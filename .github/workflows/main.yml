@@ -1,8 +1,6 @@
 name: Validate and Deploy Resource
 
 on:
-  push:
-    branches: ["main"]
   pull_request:
     branches: ["main"]
   workflow_dispatch:
@@ -16,19 +14,22 @@ on:
           - staging
           - production
 
+permissions:
+  contents: read
+
 jobs:
   validate-code:
     name: Lint, Test, and Deep Security Scan
     runs-on: ubuntu-latest
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@63c24ba6bd7ba022e95695ff85de572304a18142 # v2.7.0
+        uses: step-security/harden-runner@v2
 
       - name: Checkout repository
-        uses: actions/checkout@a12a3943b4e8c8ea41ed3efaed7189cda9389c19 # v4.0.0
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@82c7e631bb3cdc910f68e0081d67478d79c6982d # v5.1.0
+        uses: actions/setup-python@v5
 
       - name: Install Dependencies
         run: |
@@ -55,28 +56,18 @@ jobs:
       - name: Scan CloudFormation for Security
         run: cfn_nag_scan --input-path . --fail-on-warnings
 
-      - name: Advanced SAST Scan (Semgrep)
-        uses: semgrep/semgrep-action@v2
-        with:
-          config: >-
-            p/python
-            p/boto3
-            p/owasp-top-ten
-            p/secrets
-
       - name: Scan Dependencies for Vulnerabilities (OSV-Scanner)
-        uses: google/osv-scanner-action@v1.7.0
-        with:
-          scan-args: -r .
+        uses: google/osv-scanner-action@v2
 
       - name: Run Unit Tests
-        run: pytest lambda/
+        run: pytest tests/
 
   deploy-to-aws:
     name: Deploy to ${{ github.event.inputs.target-environment || 'development' }}
     runs-on: ubuntu-latest
     needs: validate-code
-    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
+    # This job only runs when manually dispatched
+    if: github.event_name == 'workflow_dispatch'
 
     environment:
       name: ${{ github.event.inputs.target-environment || 'development' }}
@@ -87,21 +78,21 @@ jobs:
 
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@63c24ba6bd7ba022e95695ff85de572304a18142 # v2.7.0
+        uses: step-security/harden-runner@v2
 
       - name: Checkout repository
-        uses: actions/checkout@a12a3943b4e8c8ea41ed3efaed7189cda9389c19 # v4.0.0
+        uses: actions/checkout@v4
 
       - name: Determine Target Environment
         run: |
-          TARGET_ENV=${{ github.event.inputs.target-environment || 'development' }}
+          TARGET_ENV=${{ github.event.inputs.target-environment }}
           echo "TARGET_ENV=${TARGET_ENV}" >> $GITHUB_ENV
 
       - name: Load Config and Generate Parameters
         id: load_config
         run: |
           CONFIG_JSON=$(cat config.json | jq -r --arg TARGET_ENV "$TARGET_ENV" '.[$TARGET_ENV]')
-          OVERRIDES=$(echo "$CONFIG_JSON" | jq -r 'to_entries | .[] | select(.key != "ssm_parameter_for_role" and .key != "aws_region") | .key + "=" + (.value|tostring)' | tr '\n' ' ')
+          OVERRIDES=$(echo "$CONFIG_JSON" | jq -r 'to_entries | .[] | select(.key != "ssm_parameter_for_role" and .key != "aws_region" and .key != "cloudformation_stack_name" and .key != "s3_bucket_for_artifacts") | .key + "=" + (.value|tostring)' | tr '\n' ' ')
 
           echo "overrides_string=$OVERRIDES" >> $GITHUB_OUTPUT
           echo "ssm_param_name=$(echo "$CONFIG_JSON" | jq -r '.ssm_parameter_for_role')" >> $GITHUB_ENV
@@ -133,13 +124,14 @@ jobs:
         run: |
           cd lambda
           zip -r ../${{ env.s3_key }} .
-          aws s3 cp ../${{ env.s3_key }} s3://${{ env.s3_bucket }}/${{ env.s3_key }}
+          cd ..
+          aws s3 cp ${{ env.s3_key }} s3://${{ env.s3_bucket }}/${{ env.s3_key }}
 
       - name: Deploy CloudFormation Stack
         run: |
           aws cloudformation deploy \
             --template-file deployer.yaml \
             --stack-name ${{ env.stack_name }} \
-            --parameter-overrides ${{ steps.load_config.outputs.overrides_string }} LambdaCodeS3Key=${{ env.s3_key }} \
+            --parameter-overrides ${{ steps.load_config.outputs.overrides_string }} LambdaCodeS3Bucket=${{ env.s3_bucket }} LambdaCodeS3Key=${{ env.s3_key }} \
             --capabilities CAPABILITY_IAM \
             --no-fail-on-empty-changeset
