@@ -1,0 +1,85 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Creates the central OIDC provider and a least-privilege IAM Role for GitHub Actions federation.
+
+Parameters:
+  GitHubOrg:
+    Type: String
+    Description: "Your GitHub organization name."
+  GitHubRepo:
+    Type: String
+    Description: "The name of your GitHub repository within the organization."
+  ProjectName:
+    Type: String
+    Description: "A unique base name for resources created by this stack."
+    Default: "Central-Tooling-Github-Actions"
+  SsmKmsKeyArn:
+    Type: String
+    Description: "Required only if UseEncryptedSSMParameters is true. The ARN of the KMS key used for SSM."
+    Default: "arn:aws:kms:us-east-1:123456789012:key/dummy-key-for-unencrypted-params"
+  TargetRoleName:
+    Type: String
+    Default: "InternalToolingDeploymentRole"
+  UseEncryptedSSMParameters:
+    Type: String
+    Description: "Set to 'true' if the SSM parameters for role ARNs are encrypted using KMS."
+    Default: "false"
+    AllowedValues: ["true", "false"]
+
+Conditions:
+  ShouldAddKmsDecryptPolicy: !Equals [!Ref UseEncryptedSSMParameters, "true"]
+
+Resources:
+  GitHubOIDCProvider:
+    Type: "AWS::IAM::OIDCProvider"
+    Properties:
+      Url: "https://token.actions.githubusercontent.com"
+      ClientIdList: ["sts.amazonaws.com"]
+      ThumbprintList:
+        - "1b511abead59c6ce207077c0bf0e0043b1382612"
+
+  GitHubActionsToolingRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      RoleName: !Sub "${ProjectName}-GitHubActionsToolingRole"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Ref GitHubOIDCProvider
+            Action: "sts:AssumeRoleWithWebIdentity"
+            Condition:
+              StringEquals:
+                "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
+              StringLike:
+                "token.actions.githubusercontent.com:sub":
+                  - !Sub "repo:${GitHubOrg}/${GitHubRepo}:ref:refs/heads/*"
+                  - !Sub "repo:${GitHubOrg}/${GitHubRepo}:ref:refs/tags/*"
+                  - !Sub "repo:${GitHubOrg}/${GitHubRepo}:pull_request"
+      Policies:
+        - PolicyName: "AssumeDeploymentRolesAndReadConfigPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: "sts:AssumeRole"
+                Resource: !Sub "arn:aws:iam::*:role/${TargetRoleName}"
+
+              - Effect: Allow
+                Action: "ssm:GetParameter"
+                Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/github/dashboard/*"
+
+              - !If
+                - ShouldAddKmsDecryptPolicy
+                - Effect: Allow
+                  Action: "kms:Decrypt"
+                  Resource: !Ref SsmKmsKeyArn
+                - !Ref "AWS::NoValue"
+
+Outputs:
+  GitHubActionsToolingRoleArn:
+    Description: "The ARN of the created GitHub Actions Tooling Role"
+    Value: !GetAtt GitHubActionsToolingRole.Arn
+    Export:
+      Name: !Sub "${ProjectName}-ToolingRoleArn"

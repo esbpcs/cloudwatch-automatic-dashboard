@@ -1,0 +1,129 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+    Creates a hybrid dashboard with SLOs, detailed metrics, and dynamic disk discovery.
+Parameters:
+    Name:
+        Type: String
+        Description: "A unique name for your resources (e.g., OpsDashboard)."
+        Default: "AutomatedCloudWatch"
+        AllowedPattern: "[A-Za-z0-9-]+"
+    DashboardName:
+        Type: String
+        Description: "Name of the CloudWatch dashboard (e.g., Operations-Dashboard)."
+        Default: !Sub "${Name}-Dashboard"
+        AllowedPattern: "[A-Za-z0-9-_]+"
+    MonitoringTagKey:
+        Type: String
+        Description: "The tag key to identify resources for monitoring."
+        Default: "ManagedBy"
+    MonitoringTagValue:
+        Type: String
+        Description: "The tag value to identify resources for monitoring."
+        Default: "esbpcs"
+    SLOTargetPercentage:
+        Type: Number
+        Description: "The target percentage for your Service Level Objectives (e.g., 99.9)."
+        Default: 99.9
+    ScheduleExpression:
+        Type: String
+        Description: "The schedule for the Lambda function to run (e.g., 'rate(1 hour)')."
+        Default: "rate(1 days)"
+    LambdaMemory:
+        Type: Number
+        Description: "Memory allocation for the Lambda function. Tune based on observed usage."
+        Default: 512
+    LambdaTimeout:
+        Type: Number
+        Description: "Timeout in seconds for the Lambda function. Tune based on observed max duration."
+        Default: 900
+    LambdaCodeS3Bucket:
+        Type: String
+        Description: "The S3 bucket containing the Lambda deployment package (e.g., my-dashboard-lambda-code)."
+    LambdaCodeS3Key:
+        Type: String
+        Description: "The S3 key (path) for the Lambda deployment package (e.g., function.zip)."
+        Default: "function.zip"
+
+Resources:
+    # IAM Role with a more restrictive policy based on best practices.
+    LambdaExecutionRole:
+        Type: "AWS::IAM::Role"
+        Properties:
+            RoleName: !Sub "${Name}-ExecutionRole"
+            AssumeRolePolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                    - Effect: Allow
+                      Principal: { Service: "lambda.amazonaws.com" }
+                      Action: "sts:AssumeRole"
+            Policies:
+                - PolicyName: !Sub "${Name}-Permissions"
+                  PolicyDocument:
+                      Version: "2012-10-17"
+                      Statement:
+                          - Effect: Allow
+                            Action:
+                                - "logs:CreateLogGroup"
+                                - "logs:CreateLogStream"
+                                - "logs:PutLogEvents"
+                            Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${Name}-Function:*"
+                          - Effect: Allow
+                            Action:
+                                [
+                                    "cloudwatch:PutDashboard",
+                                    "cloudwatch:GetDashboard",
+                                ]
+                            Resource: !Sub "arn:aws:cloudwatch::${AWS::AccountId}:dashboard/${DashboardName}"
+                          - Effect: Allow
+                            Action: "tag:GetResources"
+                            Resource: "*"
+                          - Effect: Allow
+                            Action: "cloudwatch:ListMetrics"
+                            Resource: "*"
+                          - Effect: Allow
+                            Action: "ec2:DescribeInstances"
+                            Resource: "*"
+                            Condition:
+                                StringEquals:
+                                    !Sub "ec2:ResourceTag/${MonitoringTagKey}": !Ref MonitoringTagValue
+
+    LambdaFunction:
+        Type: "AWS::Lambda::Function"
+        Properties:
+            FunctionName: !Sub "${Name}-Function"
+            Description: "Scans tagged resources and creates a hybrid dashboard with SLOs, detailed metrics, and dynamic disk discovery."
+            Handler: "index.lambda_handler"
+            Role: !GetAtt LambdaExecutionRole.Arn
+            Architectures: ["arm64"]
+            Runtime: "python3.12"
+            Timeout: !Ref LambdaTimeout
+            MemorySize: !Ref LambdaMemory
+            Environment:
+                Variables:
+                    DASHBOARD_NAME: !Ref DashboardName
+                    TAG_KEY: !Ref MonitoringTagKey
+                    TAG_VALUE: !Ref MonitoringTagValue
+                    SLO_TARGET: !Ref SLOTargetPercentage
+                    AWS_REGION: !Ref "AWS::Region"
+            Code:
+                S3Bucket: !Ref LambdaCodeS3Bucket
+                S3Key: !Ref LambdaCodeS3Key
+
+    # --- CloudFormation Resources for scheduling the Lambda ---
+    ScheduledRule:
+        Type: "AWS::Events::Rule"
+        Properties:
+            Name: !Sub "${Name}-ScheduledTrigger"
+            ScheduleExpression: !Ref ScheduleExpression
+            State: "ENABLED"
+            Targets:
+                - Arn: !GetAtt LambdaFunction.Arn
+                  Id: "DynamicDashboardFinalLambdaTarget"
+
+    PermissionForEventsToInvokeLambda:
+        Type: "AWS::Lambda::Permission"
+        Properties:
+            FunctionName: !GetAtt LambdaFunction.Arn
+            Action: "lambda:InvokeFunction"
+            Principal: "events.amazonaws.com"
+            SourceArn: !GetAtt ScheduledRule.Arn

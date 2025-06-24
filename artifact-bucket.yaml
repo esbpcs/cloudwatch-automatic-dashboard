@@ -1,0 +1,68 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Creates a secure, versioned S3 bucket for CI/CD artifacts with best-practice
+  configurations for security, cost-optimization, and lifecycle management.
+
+Parameters:
+  ArtifactS3BucketName:
+    Type: String
+    Description: "A globally unique name for the S3 artifact bucket."
+    AllowedPattern: "[a-z0-9.-]+"
+    ConstraintDescription: "Bucket name can only contain lowercase letters, numbers, dots, and hyphens."
+  # Old version of same artifact cleanup
+  NoncurrentVersionExpirationDays:
+    Type: Number
+    Description: "Number of days after which to permanently delete old, non-current artifact versions."
+    Default: 30
+  # Uploaded but not complete (Hidden)
+  IncompleteUploadCleanupDays:
+    Type: Number
+    Description: "Number of days after which to abort and clean up incomplete multipart uploads."
+    Default: 7
+  # Current and used but rarely accessed
+  IntelligentTieringTransitionDays:
+    Type: Number
+    Description: "Number of days after which to transition artifacts to Intelligent-Tiering storage class."
+    Default: 90
+
+Resources:
+  ArtifactBucket:
+    Type: "AWS::S3::Bucket"
+    Properties:
+      BucketName: !Ref ArtifactS3BucketName
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: AbortIncompleteMultipartUploads
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: !Ref IncompleteUploadCleanupDays
+          - Id: TransitionOldArtifactsToIntelligentTiering
+            Status: Enabled
+            Transitions:
+              - StorageClass: INTELLIGENT_TIERING
+                TransitionInDays: !Ref IntelligentTieringTransitionDays
+          - Id: CleanupOldArtifactVersions
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: !Ref NoncurrentVersionExpirationDays
+
+Outputs:
+  ArtifactBucketName:
+    Description: "The name of the created S3 artifact bucket."
+    Value: !Ref ArtifactBucket
+    Export:
+      Name: !Sub "${AWS::StackName}-ESBPCS"

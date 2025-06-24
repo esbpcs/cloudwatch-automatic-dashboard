@@ -1,0 +1,42 @@
+{
+    "development": {
+        "Name": "AutomatedCloudWatch-Dev",
+        "DashboardName": "Dev-Dashboard",
+        "MonitoringTagKey": "ManagedBy",
+        "MonitoringTagValue": "esbpcs-dev",
+        "SLOTargetPercentage": 99.9,
+        "ScheduleExpression": "rate(1 day)",
+        "LambdaMemory": 512,
+        "LambdaTimeout": 900,
+        "LambdaCodeS3Bucket": "esbpcs-cloudwatch-dashboard-artifacts",
+        "LambdaCodeS3Key": "function.zip",
+        "ssm_parameter_for_role": "/github/dashboard/development/role-arn"
+    }
+    // ,
+    // "staging": {
+    //     "Name": "AutomatedCloudWatch-Staging",
+    //     "DashboardName": "Staging-Dashboard",
+    //     "MonitoringTagKey": "ManagedBy",
+    //     "MonitoringTagValue": "esbpcs-staging",
+    //     "SLOTargetPercentage": 99.95,
+    //     "ScheduleExpression": "rate(1 hour)",
+    //     "LambdaMemory": 1024,
+    //     "LambdaTimeout": 900,
+    //     "LambdaCodeS3Bucket": "esbpcs-cloudwatch-dashboard-artifacts-staging",
+    //     "LambdaCodeS3Key": "function.zip",
+    //     "ssm_parameter_for_role": "/github/dashboard/staging/role-arn"
+    // },
+    // "production": {
+    //     "Name": "AutomatedCloudWatch-Prod",
+    //     "DashboardName": "Production-Dashboard",
+    //     "MonitoringTagKey": "ManagedBy",
+    //     "MonitoringTagValue": "esbpcs-prod",
+    //     "SLOTargetPercentage": 99.99,
+    //     "ScheduleExpression": "rate(1 hour)",
+    //     "LambdaMemory": 1024,
+    //     "LambdaTimeout": 900,
+    //     "LambdaCodeS3Bucket": "esbpcs-cloudwatch-dashboard-artifacts-prod",
+    //     "LambdaCodeS3Key": "function.zip",
+    //     "ssm_parameter_for_role": "/github/dashboard/production/role-arn"
+    // }
+}

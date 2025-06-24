@@ -1,0 +1,21 @@
+# CI/CD Quality, Security, and Testing Tools
+
+# Formatting
+black==24.4.2
+isort==5.13.2
+
+# Linting & Quality
+flake8==7.1.0
+
+# Python Application Security (SAST)
+bandit==1.7.9
+
+# Dependency Vulnerability Scanning
+safety==3.2.3
+
+# CloudFormation Linter
+cfn-lint==1.3.1
+
+# Python Unit Testing
+pytest==8.2.2
+moto==5.0.10
