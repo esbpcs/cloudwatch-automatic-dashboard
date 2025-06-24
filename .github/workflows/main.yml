@@ -84,9 +84,10 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Determine Target Environment
+        env:
+          TARGET_ENV: ${{ github.event.inputs.target-environment || 'development' }}
         run: |
-          TARGET_ENV=${{ github.event.inputs.target-environment }}
-          echo "TARGET_ENV=${TARGET_ENV}" >> $GITHUB_ENV
+          echo "TARGET_ENV=\"$TARGET_ENV\"" >> $GITHUB_ENV
 
       - name: Load Config and Generate Parameters
         id: load_config
