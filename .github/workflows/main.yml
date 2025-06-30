@@ -28,6 +28,8 @@ jobs:
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit # Monitor Traffic
 
       # This step checks out the application code into a subdirectory named 'app'
       - name: Checkout Application Repository

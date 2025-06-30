@@ -85,6 +85,8 @@ jobs:
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit # Monitor Traffic
 
       - name: Configure AWS Credentials for Target Account (using Management Connector)
         uses: aws-actions/configure-aws-credentials@v4
