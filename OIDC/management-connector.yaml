@@ -1,0 +1,70 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  MANAGEMENT CONNECTOR: Deploys a permanent IAM Role in a target account that acts as a secure
+  entry point for GitHub Actions to perform high-level management tasks, like deploying or
+  decommissioning application stacks.
+
+Parameters:
+  GitHubOrg:
+    Type: String
+    Description: "Your GitHub organization name (e.g., 'my-github-org')."
+  GitHubRepo:
+    Type: String
+    Description: "The name of your GitHub repository (e.g., 'my-repo')."
+  ProjectName:
+    Type: String
+    Description: "A unique base name for the resources in this stack."
+    Default: "GitHub-Management-Connector"
+
+Resources:
+  GitHubOIDCProvider:
+    Type: "AWS::IAM::OIDCProvider"
+    Properties:
+      Url: "https://token.actions.githubusercontent.com"
+      ClientIdList: ["sts.amazonaws.com"]
+      ThumbprintList:
+        - "1b511abead59c6ce207077c0bf0e0043b1382612"
+
+  ManagementConnectorRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      RoleName: !Ref ProjectName
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Ref GitHubOIDCProvider
+            Action: "sts:AssumeRoleWithWebIdentity"
+            Condition:
+              StringEquals:
+                "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
+              StringLike:
+                "token.actions.githubusercontent.com:sub": !Sub "repo:${GitHubOrg}/${GitHubRepo}:ref:refs/heads/main"
+
+      Policies:
+        - PolicyName: "ManagementConnectorPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "cloudformation:CreateStack"
+                  - "cloudformation:DescribeStacks"
+                  - "cloudformation:UpdateStack"
+                  - "cloudformation:DeleteStack"
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - "iam:CreateRole"
+                  - "iam:GetRole"
+                  - "iam:DeleteRole"
+                  - "iam:PutRolePolicy"
+                  - "iam:DeleteRolePolicy"
+                  - "iam:PassRole"
+                Resource: "arn:aws:iam::*:role/InternalToolingDeploymentRole"
+
+Outputs:
+  ManagementConnectorRoleArn:
+    Description: "The ARN of the Management Connector Role. Save this as an environment-specific GitHub secret."
+    Value: !GetAtt ManagementConnectorRole.Arn

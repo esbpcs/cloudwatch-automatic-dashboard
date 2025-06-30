@@ -1,35 +1,33 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
-  Creates the central OIDC provider and a least-privilege IAM Role for GitHub Actions federation.
+  Deploys the central, one-time resources for GitHub Actions OIDC integration.
+  This includes the OIDC Provider and a central Tooling Role.
 
 Parameters:
   GitHubOrg:
     Type: String
-    Description: "Your GitHub organization name."
+    Description: "Your GitHub organization name (e.g., 'my-github-org')."
   GitHubRepo:
     Type: String
-    Description: "The name of your GitHub repository within the organization."
+    Description: "The name of your GitHub repository (e.g., 'my-repo')."
   ProjectName:
     Type: String
     Description: "A unique base name for resources created by this stack."
-    Default: "Central-Tooling-Github-Actions"
-  SsmKmsKeyArn:
-    Type: String
-    Description: "Required only if UseEncryptedSSMParameters is true. The ARN of the KMS key used for SSM."
-    Default: "arn:aws:kms:us-east-1:123456789012:key/dummy-key-for-unencrypted-params"
+    Default: "ESBPCS"
+  # This is the static name of the role that will be created in target accounts.
   TargetRoleName:
     Type: String
+    Description: "The static name of the deployment role to be assumed in target accounts."
     Default: "InternalToolingDeploymentRole"
-  UseEncryptedSSMParameters:
+  # This is the generic path under which all project role ARNs will be stored.
+  SsmParameterPath:
     Type: String
-    Description: "Set to 'true' if the SSM parameters for role ARNs are encrypted using KMS."
-    Default: "false"
-    AllowedValues: ["true", "false"]
-
-Conditions:
-  ShouldAddKmsDecryptPolicy: !Equals [!Ref UseEncryptedSSMParameters, "true"]
+    Description: "The generic SSM Parameter Store path for storing all project deployment role ARNs."
+    Default: "/github/"
 
 Resources:
+  # The OpenID Connect (OIDC) provider for GitHub Actions.
+  # This establishes the trust relationship between your AWS account and GitHub.
   GitHubOIDCProvider:
     Type: "AWS::IAM::OIDCProvider"
     Properties:
@@ -38,6 +36,9 @@ Resources:
       ThumbprintList:
         - "1b511abead59c6ce207077c0bf0e0043b1382612"
 
+  # The central IAM Role that GitHub Actions will assume via OIDC.
+  # This role has the minimum permissions needed to assume the deployment role in target accounts
+  # and read the configuration from SSM Parameter Store.
   GitHubActionsToolingRole:
     Type: "AWS::IAM::Role"
     Properties:
@@ -50,36 +51,37 @@ Resources:
               Federated: !Ref GitHubOIDCProvider
             Action: "sts:AssumeRoleWithWebIdentity"
             Condition:
+              # Security best practice: Ensures only workflows from your specific repository can assume this role.
               StringEquals:
                 "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
               StringLike:
                 "token.actions.githubusercontent.com:sub":
-                  - !Sub "repo:${GitHubOrg}/${GitHubRepo}:ref:refs/heads/*"
-                  - !Sub "repo:${GitHubOrg}/${GitHubRepo}:ref:refs/tags/*"
-                  - !Sub "repo:${GitHubOrg}/${GitHubRepo}:pull_request"
+                  - !Sub "repo:${GitHubOrg}/${GitHubRepo}:ref:refs/heads/*" # Allows branches
+                  - !Sub "repo:${GitHubOrg}/${GitHubRepo}:ref:refs/tags/*" # Allows tags
+                  - !Sub "repo:${GitHubOrg}/${GitHubRepo}:pull_request" # Allows pull requests
       Policies:
         - PolicyName: "AssumeDeploymentRolesAndReadConfigPolicy"
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
+              # Allows this central role to assume the deployment role in ANY target account.
               - Effect: Allow
                 Action: "sts:AssumeRole"
                 Resource: !Sub "arn:aws:iam::*:role/${TargetRoleName}"
 
+              # Allows this role to read the ARN of the deployment role from SSM Parameter Store.
               - Effect: Allow
                 Action: "ssm:GetParameter"
-                Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/github/dashboard/*"
+                Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmParameterPath}*"
 
-              - !If
-                - ShouldAddKmsDecryptPolicy
-                - Effect: Allow
-                  Action: "kms:Decrypt"
-                  Resource: !Ref SsmKmsKeyArn
-                - !Ref "AWS::NoValue"
+              # Allows this role to use AWS-Managed Keys to decrypt the SecureString parameters from SSM.
+              - Effect: Allow
+                Action: "kms:Decrypt"
+                Resource: !Sub "arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/*"
 
 Outputs:
   GitHubActionsToolingRoleArn:
-    Description: "The ARN of the created GitHub Actions Tooling Role"
+    Description: "The ARN of the created GitHub Actions Tooling Role. This is needed as an input for the client.yaml stack."
     Value: !GetAtt GitHubActionsToolingRole.Arn
     Export:
       Name: !Sub "${ProjectName}-ToolingRoleArn"
