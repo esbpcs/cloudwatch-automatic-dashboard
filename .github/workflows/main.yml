@@ -15,23 +15,29 @@ on:
 
 permissions:
   id-token: write
-  contents: read # Read permissions are required to check out other repositories.
+  contents: read
 
 jobs:
   deploy-to-aws:
     name: Deploy ${{ github.event.inputs.application_repo }} to ${{ github.event.inputs.company_name }}-${{ github.event.inputs.environment_name }}
     runs-on: ubuntu-latest
     environment:
-      # Dynamically constructs the GitHub Environment name from inputs
       name: ${{ github.event.inputs.company_name }}-${{ github.event.inputs.environment_name }}
 
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@v2
         with:
-          egress-policy: audit # Monitor Traffic
+          egress-policy: block
+          allowed-endpoints: >
+            github.com:443
+            *.actions.githubusercontent.com:443
+            sts.amazonaws.com:443
+            ssm.ap-southeast-1.amazonaws.com:443
+            cloudformation.ap-southeast-1.amazonaws.com:443
+            s3.amazonaws.com:443
+            s3.ap-southeast-1.amazonaws.com:443
 
-      # This step checks out the application code into a subdirectory named 'app'
       - name: Checkout Application Repository
         uses: actions/checkout@v4
         with:
@@ -40,21 +46,18 @@ jobs:
 
       - name: Determine Target Environment
         run: |
-          # Sets the composite environment name used to find the right block in config.json
           TARGET_ENV="${{ github.event.inputs.company_name }}-${{ github.event.inputs.environment_name }}"
-          echo "TARGET_ENV=${TARGET_ENV}" >> $GITHUB_ENV
+          echo "TARGET_ENV=$TARGET_ENV" >> $GITHUB_ENV
 
-      # This step now reads the config file from the checked-out application code
       - name: Load Config and Generate Parameters
         id: load_config
-        working-directory: ./app # Run this step inside the 'app' directory
+        working-directory: ./app
         run: |
           CONFIG_JSON=$(jq -r --arg TARGET_ENV "$TARGET_ENV" '.[$TARGET_ENV]' config.json)
           OVERRIDES=$(echo "$CONFIG_JSON" | jq -r 'to_entries | .[] | select(.key != "ssm_parameter_for_role") | .key + "=" + (.value|tostring)' | tr '\n' ' ')
           SSM_PARAM_NAME=$(echo "$CONFIG_JSON" | jq -r '.ssm_parameter_for_role')
           S3_BUCKET=$(echo "$CONFIG_JSON" | jq -r '.LambdaCodeS3Bucket')
           STACK_NAME=$(echo "$CONFIG_JSON" | jq -r '.Name')
-
           echo "overrides_string=$OVERRIDES" >> $GITHUB_OUTPUT
           echo "SSM_PARAM_NAME=$SSM_PARAM_NAME" >> $GITHUB_ENV
           echo "S3_BUCKET=$S3_BUCKET" >> $GITHUB_ENV
@@ -70,7 +73,9 @@ jobs:
       - name: Get Target Deployment Role ARN from SSM
         id: get_role
         run: |
+          echo "Fetching target deployment role ARN..."
           TARGET_ROLE_ARN=$(aws ssm get-parameter --name "${{ env.SSM_PARAM_NAME }}" --with-decryption --query "Parameter.Value" --output text)
+          echo "::add-mask::$TARGET_ROLE_ARN"
           echo "aws_role_to_assume=${TARGET_ROLE_ARN}" >> $GITHUB_ENV
 
       - name: Assume Final Deployment Role in Target Account
@@ -80,20 +85,21 @@ jobs:
           aws-region: ${{ env.AWS_REGION || 'ap-southeast-1' }}
           role-session-name: GitHubActions-AppDeploy-${{ github.run_id }}
 
-      # This step now zips the lambda code from the 'app' directory
       - name: Package and Upload Application Artifact
         run: |
+          echo "Packaging application..."
           cd app/lambda
-          zip -r ../../${{ env.S3_KEY }} .
+          zip -r ../../${{ env.S3_KEY }} . > /dev/null
           cd ../..
+          echo "Uploading artifact to s3://${{ env.S3_BUCKET }}/${{ env.S3_KEY }}"
           aws s3 cp ${{ env.S3_KEY }} s3://${{ env.S3_BUCKET }}/${{ env.S3_KEY }}
 
-      # This step deploys the deployer.yaml from the 'app' directory
       - name: Deploy CloudFormation Stack
         run: |
+          echo "Deploying application stack: ${{ env.STACK_NAME }}"
           aws cloudformation deploy \
             --template-file app/deployer.yaml \
             --stack-name ${{ env.STACK_NAME }} \
             --parameter-overrides ${{ steps.load_config.outputs.overrides_string }} LambdaCodeS3Bucket=${{ env.S3_BUCKET }} LambdaCodeS3Key=${{ env.S3_KEY }} \
             --capabilities CAPABILITY_IAM \
-            --no-fail-on-empty-changeset
+            --no-fail-on-empty-changeset > /dev/null

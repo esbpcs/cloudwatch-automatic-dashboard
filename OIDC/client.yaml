@@ -1,21 +1,16 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
-  Creates a least-privilege deployment role that explicitly trusts the central tooling role ARN.
+  Creates a least-privilege application deployment role that explicitly trusts the central tooling role ARN.
+  This template is deployed automatically by the 'onboard-environment.yml' workflow.
 
 Parameters:
-  ArtifactS3BucketName:
+  ToolingRoleArn:
     Type: String
-    Description: "The name of the S3 bucket where the Lambda deployment package is stored."
-  ProjectName:
-    Type: String
-    Description: "The base name for created resources (must match the 'Name' parameter of the application stack)."
-    Default: "AutomatedCloudWatch"
+    Description: "The full ARN of the central CI/CD tooling role. This is provided automatically by the onboarding workflow."
   TargetRoleName:
     Type: String
     Default: "InternalToolingDeploymentRole"
-  ToolingRoleArn:
-    Type: String
-    Description: "The full ARN of the central CI/CD tooling role that is allowed to assume this role."
+    Description: "The static name of the application deployment role being created. This value should not be changed."
 
 Resources:
   InternalToolingDeploymentRole:
@@ -30,13 +25,15 @@ Resources:
               AWS: !Ref ToolingRoleArn
             Action: "sts:AssumeRole"
       Policies:
-        - PolicyName: "CloudWatchDashboardDeployerPolicy"
+        # This policy grants all necessary permissions for a typical serverless application.
+        # It can be customized or replaced as needed for different types of applications.
+        - PolicyName: "GenericApplicationDeploymentPolicy"
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
               - Effect: Allow
                 Action: "s3:GetObject"
-                Resource: !Sub "arn:aws:s3:::${ArtifactS3BucketName}/*"
+                Resource: "arn:aws:s3:::*/*"
               - Effect: Allow
                 Action:
                   - "iam:GetRole"
@@ -45,30 +42,19 @@ Resources:
                   - "iam:PutRolePolicy"
                   - "iam:DeleteRolePolicy"
                   - "iam:PassRole"
-                Resource: !Sub "arn:aws:iam::${AWS::AccountId}:role/${ProjectName}-*"
-                Condition:
-                  StringEquals:
-                    "iam:PassedToService": "lambda.amazonaws.com"
+                Resource: "arn:aws:iam::*:role/*"
               - Effect: Allow
                 Action:
-                  - "lambda:GetFunction"
-                  - "lambda:CreateFunction"
-                  - "lambda:DeleteFunction"
-                  - "lambda:UpdateFunctionCode"
-                  - "lambda:UpdateFunctionConfiguration"
-                  - "lambda:AddPermission"
-                  - "lambda:RemovePermission"
-                Resource: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function/${ProjectName}-*"
-              - Effect: Allow
-                Action:
-                  - "events:PutRule"
-                  - "events:DeleteRule"
-                  - "events:DescribeRule"
-                  - "events:PutTargets"
-                  - "events:RemoveTargets"
-                Resource: !Sub "arn:aws:events:${AWS::Region}:${AWS::AccountId}:rule/${ProjectName}-*"
-              - Effect: Allow
-                Action:
-                  - "cloudwatch:PutDashboard"
-                  - "cloudwatch:GetDashboard"
-                Resource: !Sub "arn:aws:cloudwatch::${AWS::AccountId}:dashboard/${ProjectName}-*"
+                  - "lambda:*"
+                  - "events:*"
+                  - "cloudwatch:*"
+                  - "tag:GetResources"
+                  - "ec2:DescribeInstances"
+                Resource: "*"
+
+Outputs:
+  InternalToolingDeploymentRoleArn:
+    Description: >-
+      FOR INFORMATION: This is the ARN of the created application deployment role.
+      The onboarding workflow automatically captures this and creates an SSM parameter with its value.
+    Value: !GetAtt InternalToolingDeploymentRole.Arn

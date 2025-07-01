@@ -1,16 +1,16 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
   MANAGEMENT CONNECTOR: Deploys a permanent IAM Role in a target account that acts as a secure
-  entry point for GitHub Actions to perform high-level management tasks, like deploying or
-  decommissioning application stacks.
+  entry point for GitHub Actions to perform high-level management tasks.
 
 Parameters:
   GitHubOrg:
     Type: String
-    Description: "Your GitHub organization name (e.g., 'my-github-org')."
+    Description: "Your GitHub organization name (e.g., 'esbpcs-org')."
   GitHubRepo:
     Type: String
-    Description: "The name of your GitHub repository (e.g., 'my-repo')."
+    Description: "The name of your central management repository where your reusable workflows reside."
+    Default: "CentralManagementRepo"
   ProjectName:
     Type: String
     Description: "A unique base name for the resources in this stack."
@@ -22,8 +22,6 @@ Resources:
     Properties:
       Url: "https://token.actions.githubusercontent.com"
       ClientIdList: ["sts.amazonaws.com"]
-      ThumbprintList:
-        - "1b511abead59c6ce207077c0bf0e0043b1382612"
 
   ManagementConnectorRole:
     Type: "AWS::IAM::Role"
@@ -40,8 +38,10 @@ Resources:
               StringEquals:
                 "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
               StringLike:
-                "token.actions.githubusercontent.com:sub": !Sub "repo:${GitHubOrg}/${GitHubRepo}:ref:refs/heads/main"
-
+                "token.actions.githubusercontent.com:sub":
+                  - !Sub "repo:${GitHubOrg}/${GitHubRepo}:ref:refs/heads/*"
+                  - !Sub "repo:${GitHubOrg}/${GitHubRepo}:ref:refs/tags/*"
+                  - !Sub "repo:${GitHubOrg}/${GitHubRepo}:pull_request"
       Policies:
         - PolicyName: "ManagementConnectorPolicy"
           PolicyDocument:
@@ -66,5 +66,8 @@ Resources:
 
 Outputs:
   ManagementConnectorRoleArn:
-    Description: "The ARN of the Management Connector Role. Save this as an environment-specific GitHub secret."
+    Description: >-
+      ACTION REQUIRED: Copy this ARN. In your GitHub repository, create a GitHub Environment
+      (e.g., 'esbpcs-sandbox') and save this ARN as an environment-specific secret.
+      The required secret name is 'MANAGEMENT_CONNECTOR_ROLE_ARN'.
     Value: !GetAtt ManagementConnectorRole.Arn

@@ -22,7 +22,6 @@ permissions:
   contents: read
 
 jobs:
-  # This job now has an initial step to check out the app repo and read its config.
   delete_application_stack:
     name: 1. Delete Application Stack
     runs-on: ubuntu-latest
@@ -34,6 +33,14 @@ jobs:
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@v2
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            github.com:443
+            *.actions.githubusercontent.com:443
+            sts.amazonaws.com:443
+            ssm.ap-southeast-1.amazonaws.com:443
+            cloudformation.ap-southeast-1.amazonaws.com:443
 
       - name: Checkout Application Repository
         uses: actions/checkout@v4
@@ -49,7 +56,6 @@ jobs:
           CONFIG_JSON=$(jq -r --arg TARGET_ENV "$COMPOSITE_ENV_NAME" '.[$TARGET_ENV]' config.json)
           echo "STACK_NAME=$(echo "$CONFIG_JSON" | jq -r '.Name')" >> $GITHUB_ENV
           echo "SSM_PARAM_NAME=$(echo "$CONFIG_JSON" | jq -r '.ssm_parameter_for_role')" >> $GITHUB_ENV
-          # This now outputs the project identifier for the other jobs to use
           echo "project_identifier=$(echo "$CONFIG_JSON" | jq -r '.project_identifier')" >> $GITHUB_OUTPUT
 
       - name: Configure AWS Credentials for Tooling Account
@@ -62,6 +68,7 @@ jobs:
         id: get_role
         run: |
           TARGET_ROLE_ARN=$(aws ssm get-parameter --name "${{ env.SSM_PARAM_NAME }}" --with-decryption --query "Parameter.Value" --output text)
+          echo "::add-mask::$TARGET_ROLE_ARN"
           echo "aws_role_to_assume=${TARGET_ROLE_ARN}" >> $GITHUB_ENV
 
       - name: Assume Final Deployment Role in Target Account
@@ -72,6 +79,7 @@ jobs:
 
       - name: Delete Application Stack
         run: |
+          echo "Deleting application stack: ${{ env.STACK_NAME }}"
           aws cloudformation delete-stack --stack-name ${{ env.STACK_NAME }}
           echo "Waiting for stack deletion to complete..."
           aws cloudformation wait stack-delete-complete --stack-name ${{ env.STACK_NAME }}
@@ -86,7 +94,10 @@ jobs:
       - name: Harden Runner
         uses: step-security/harden-runner@v2
         with:
-          egress-policy: audit # Monitor Traffic
+          egress-policy: block
+          allowed-endpoints: >
+            sts.amazonaws.com:443
+            cloudformation.ap-southeast-1.amazonaws.com:443
 
       - name: Configure AWS Credentials for Target Account (using Management Connector)
         uses: aws-actions/configure-aws-credentials@v4
@@ -96,9 +107,9 @@ jobs:
 
       - name: Delete Client IAM Role Stack
         run: |
-          # This now constructs the stack name dynamically using the project identifier
           PROJECT_ID="${{ needs.delete_application_stack.outputs.project_identifier }}"
           STACK_NAME="${{ github.event.inputs.company_name }}-${{ github.event.inputs.environment_name }}-${PROJECT_ID}-client"
+          echo "Deleting client role stack: $STACK_NAME"
           aws cloudformation delete-stack --stack-name $STACK_NAME
           echo "Waiting for stack deletion to complete..."
           aws cloudformation wait stack-delete-complete --stack-name $STACK_NAME
@@ -110,6 +121,11 @@ jobs:
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@v2
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            sts.amazonaws.com:443
+            ssm.ap-southeast-1.amazonaws.com:443
 
       - name: Configure AWS Credentials for Tooling Account
         uses: aws-actions/configure-aws-credentials@v4
@@ -119,7 +135,7 @@ jobs:
 
       - name: Delete SSM Parameter
         run: |
-          # This also constructs the parameter name dynamically
           PROJECT_ID="${{ needs.delete_application_stack.outputs.project_identifier }}"
           PARAMETER_NAME="/github/${{ github.event.inputs.company_name }}/${{ github.event.inputs.environment_name }}/${PROJECT_ID}/role-arn"
+          echo "Deleting SSM Parameter: $PARAMETER_NAME"
           aws ssm delete-parameter --name "$PARAMETER_NAME"

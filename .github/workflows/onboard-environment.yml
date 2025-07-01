@@ -35,9 +35,14 @@ jobs:
       - name: Harden Runner
         uses: step-security/harden-runner@v2
         with:
-          egress-policy: audit # Monitor Traffic
+          egress-policy: block
+          allowed-endpoints: >
+            github.com:443
+            *.actions.githubusercontent.com:443
+            sts.amazonaws.com:443
+            ssm.ap-southeast-1.amazonaws.com:443
+            cloudformation.ap-southeast-1.amazonaws.com:443
 
-      # Checks out the specified application repository to read its config
       - name: Checkout Application Repository
         uses: actions/checkout@v4
         with:
@@ -49,8 +54,8 @@ jobs:
         run: |
           ACCOUNT_ID=$(echo "${{ secrets.MANAGEMENT_CONNECTOR_ROLE_ARN }}" | cut -d ':' -f 5)
           echo "ACCOUNT_ID=$ACCOUNT_ID" >> $GITHUB_ENV
+          echo "::add-mask::$ACCOUNT_ID"
 
-      # This new step reads the project identifier from the app's config.json
       - name: Load Project Identifier from Config
         id: load_config
         working-directory: ./app
@@ -70,21 +75,25 @@ jobs:
         run: |
           STACK_NAME="${{ github.event.inputs.company_name }}-${{ github.event.inputs.environment_name }}-${{ steps.load_config.outputs.project_identifier }}-client"
           TOOLING_ROLE_ARN="${{ secrets.CENTRAL_TOOLING_ROLE_ARN }}"
+          echo "::add-mask::$TOOLING_ROLE_ARN"
+          echo "Deploying client stack: $STACK_NAME"
           aws cloudformation deploy \
             --template-file client.yaml \
             --stack-name "$STACK_NAME" \
             --parameter-overrides ToolingRoleArn=$TOOLING_ROLE_ARN \
             --capabilities CAPABILITY_IAM \
-            --no-fail-on-empty-changeset
+            --no-fail-on-empty-changeset > /dev/null
           echo "stack_name=$STACK_NAME" >> $GITHUB_ENV
 
       - name: Get Deployment Role ARN
         id: get_role_arn
         run: |
+          echo "Fetching Deployment Role ARN..."
           ROLE_ARN=$(aws cloudformation describe-stacks \
             --stack-name ${{ env.stack_name }} \
             --query "Stacks[0].Outputs[?OutputKey=='InternalToolingDeploymentRoleArn'].OutputValue" \
             --output text)
+          echo "::add-mask::$ROLE_ARN"
           echo "role_arn=$ROLE_ARN" >> $GITHUB_OUTPUT
 
   create_ssm_parameter:
@@ -95,6 +104,11 @@ jobs:
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@v2
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            sts.amazonaws.com:443
+            ssm.ap-southeast-1.amazonaws.com:443
 
       - name: Configure AWS Credentials for Tooling Account
         uses: aws-actions/configure-aws-credentials@v4
@@ -104,13 +118,13 @@ jobs:
 
       - name: Create SSM Parameter
         run: |
-          # This now dynamically constructs the full path using the project_identifier
           PROJECT_ID="${{ needs.deploy_client_role.outputs.project_identifier }}"
           PARAMETER_NAME="/github/${{ github.event.inputs.company_name }}/${{ github.event.inputs.environment_name }}/${PROJECT_ID}/role-arn"
           ROLE_ARN="${{ needs.deploy_client_role.outputs.deployment_role_arn }}"
-
+          echo "::add-mask::$ROLE_ARN"
+          echo "Creating SSM Parameter: $PARAMETER_NAME"
           aws ssm put-parameter \
             --name "$PARAMETER_NAME" \
             --value "$ROLE_ARN" \
             --type "SecureString" \
-            --overwrite
+            --overwrite > /dev/null
