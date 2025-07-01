@@ -1,0 +1,35 @@
+name: OIDC Debugger
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  debug-oidc-claims:
+    name: "Debug OIDC Claims"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get OIDC Token and Decode
+        id: get_token
+        run: |
+          # This command gets the OIDC token from the GitHub Actions runtime
+          OIDC_TOKEN=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | jq -r '.value')
+
+          # The token is a JWT (JSON Web Token) which has three parts separated by dots.
+          # The second part is the payload, which is Base64 encoded.
+          # This command extracts the payload, decodes it, and prints the JSON.
+          TOKEN_PAYLOAD=$(echo "$OIDC_TOKEN" | cut -d '.' -f 2 | base64 --decode)
+
+          echo "---"
+          echo "DECODED OIDC TOKEN PAYLOAD:"
+          echo "$TOKEN_PAYLOAD" | jq .
+          echo "---"
+
+          # This command extracts just the 'sub' (subject) claim we need.
+          SUBJECT_CLAIM=$(echo "$TOKEN_PAYLOAD" | jq -r .sub)
+          echo "THE EXACT 'sub' (subject) CLAIM TO USE IN YOUR IAM POLICY IS:"
+          echo "$SUBJECT_CLAIM"
+          echo "---"
