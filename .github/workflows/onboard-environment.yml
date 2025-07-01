@@ -40,8 +40,12 @@ jobs:
             github.com:443
             *.actions.githubusercontent.com:443
             sts.amazonaws.com:443
+            sts.ap-southeast-1.amazonaws.com:443
+            sts.us-east-1.amazonaws.com:443
             ssm.ap-southeast-1.amazonaws.com:443
+            ssm.us-east-1.amazonaws.com:443
             cloudformation.ap-southeast-1.amazonaws.com:443
+            cloudformation.us-east-1.amazonaws.com:443
 
       - name: Checkout Application Repository
         uses: actions/checkout@v4
@@ -108,7 +112,10 @@ jobs:
           egress-policy: block
           allowed-endpoints: >
             sts.amazonaws.com:443
+            sts.ap-southeast-1.amazonaws.com:443
+            sts.us-east-1.amazonaws.com:443
             ssm.ap-southeast-1.amazonaws.com:443
+            ssm.us-east-1.amazonaws.com:443
 
       - name: Configure AWS Credentials for Tooling Account
         uses: aws-actions/configure-aws-credentials@v4
