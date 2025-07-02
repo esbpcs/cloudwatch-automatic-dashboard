@@ -1,15 +1,14 @@
 {
     "esbpcs-sandbox": {
-        "project_identifier": "dashboard",
         "Name": "AutomatedCloudWatch-Sandbox",
         "DashboardName": "Sandbox-Dashboard",
         "MonitoringTagKey": "ManagedBy",
-        "MonitoringTagValue": "esbpcs-sandbox",
-        "SLOTargetPercentage": 99.9,
-        "ScheduleExpression": "rate(1 day)",
-        "LambdaMemory": 512,
-        "LambdaTimeout": 900,
+        "MonitoringTagValue": "esbpcs",
         "LambdaCodeS3Bucket": "esbpcs-cloudwatch-dashboard-artifacts-sandbox",
+        "ScheduleExpression": "rate(1 day)",
+        "EnabledWidgets": "alb,ec2_instance,ecs_service,rds_instance,dynamodb_table,lambda_function,elasticache_cluster,acm_certificate",
+        "CustomWidgetsConfig": "[{\"type\":\"metric\",\"x\":0,\"width\":24,\"height\":6,\"properties\":{\"view\":\"timeSeries\",\"title\":\"Sandbox - Test Sign-Ups\",\"metrics\":[[\"MyApplication-Test\",\"UserSignUps\",{\"stat\":\"Sum\"}]]}}]",
+        "DimensionConfig": "{}",
         "ssm_parameter_for_role": "/github/esbpcs/sandbox/dashboard/role-arn"
     }
 }

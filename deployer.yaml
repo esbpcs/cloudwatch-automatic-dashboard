@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
-    Creates a hybrid dashboard with SLOs, detailed metrics, and dynamic disk discovery.
+    Creates a fully dynamic and automated CloudWatch dashboard with conditional SLOs, custom dimensions, and tag-based discovery.
 Parameters:
     Name:
         Type: String
@@ -22,30 +22,53 @@ Parameters:
         Default: "esbpcs"
     SLOTargetPercentage:
         Type: Number
-        Description: "The target percentage for your Service Level Objectives (e.g., 99.9)."
+        Description: "The target percentage for availability SLOs (e.g., 99.9)."
         Default: 99.9
+    CPUSLOTarget:
+        Type: Number
+        Description: "The target CPU utilization percentage for the EC2 performance SLO."
+        Default: 80
+    RDSCpuSLOTarget:
+        Type: Number
+        Description: "The target CPU utilization percentage for the RDS performance SLO."
+        Default: 80
+    LatencySLOTarget:
+        Type: Number
+        Description: "The target latency in milliseconds for the RDS performance SLO."
+        Default: 10
     ScheduleExpression:
         Type: String
-        Description: "The schedule for the Lambda function to run (e.g., 'rate(1 hour)')."
-        Default: "rate(1 days)"
+        Description: "The schedule for the Lambda function to run (e.g., 'rate(1 day)')."
+        Default: "rate(1 day)"
     LambdaMemory:
         Type: Number
-        Description: "Memory allocation for the Lambda function. Tune based on observed usage."
+        Description: "Memory allocation for the Lambda function."
         Default: 512
     LambdaTimeout:
         Type: Number
-        Description: "Timeout in seconds for the Lambda function. Tune based on observed max duration."
+        Description: "Timeout in seconds for the Lambda function."
         Default: 900
     LambdaCodeS3Bucket:
         Type: String
-        Description: "The S3 bucket containing the Lambda deployment package (e.g., my-dashboard-lambda-code)."
+        Description: "The S3 bucket containing the Lambda deployment package."
     LambdaCodeS3Key:
         Type: String
-        Description: "The S3 key (path) for the Lambda deployment package (e.g., function.zip)."
+        Description: "The S3 key for the Lambda deployment package."
         Default: "function.zip"
+    EnabledWidgets:
+        Type: String
+        Description: "Comma-separated list of widget keys to enable for the dashboard."
+        Default: "alb,nlb,ec2_instance,ecs_service,eks_cluster,lambda_function,rds_instance,dynamodb_table,elasticache_cluster,apigateway_stage"
+    CustomWidgetsConfig:
+        Type: String
+        Description: "A JSON string defining an array of custom widgets to add to the dashboard."
+        Default: "[]"
+    DimensionConfig:
+        Type: String
+        Description: "JSON string to specify exact dimensions for services."
+        Default: "{}"
 
 Resources:
-    # IAM Role with a more restrictive policy based on best practices.
     LambdaExecutionRole:
         Type: "AWS::IAM::Role"
         Properties:
@@ -69,10 +92,8 @@ Resources:
                             Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${Name}-Function:*"
                           - Effect: Allow
                             Action:
-                                [
-                                    "cloudwatch:PutDashboard",
-                                    "cloudwatch:GetDashboard",
-                                ]
+                                - "cloudwatch:PutDashboard"
+                                - "cloudwatch:GetDashboard"
                             Resource: !Sub "arn:aws:cloudwatch::${AWS::AccountId}:dashboard/${DashboardName}"
                           - Effect: Allow
                             Action: "tag:GetResources"
@@ -91,7 +112,7 @@ Resources:
         Type: "AWS::Lambda::Function"
         Properties:
             FunctionName: !Sub "${Name}-Function"
-            Description: "Scans tagged resources and creates a hybrid dashboard with SLOs, detailed metrics, and dynamic disk discovery."
+            Description: "Scans tagged resources and creates a dynamic dashboard."
             Handler: "index.lambda_handler"
             Role: !GetAtt LambdaExecutionRole.Arn
             Architectures: ["arm64"]
@@ -103,13 +124,13 @@ Resources:
                     DASHBOARD_NAME: !Ref DashboardName
                     TAG_KEY: !Ref MonitoringTagKey
                     TAG_VALUE: !Ref MonitoringTagValue
-                    SLO_TARGET: !Ref SLOTargetPercentage
                     AWS_REGION: !Ref "AWS::Region"
+                    ENABLED_WIDGETS: !Ref EnabledWidgets
+                    CUSTOM_WIDGETS_CONFIG: !Ref CustomWidgetsConfig
             Code:
                 S3Bucket: !Ref LambdaCodeS3Bucket
                 S3Key: !Ref LambdaCodeS3Key
 
-    # --- CloudFormation Resources for scheduling the Lambda ---
     ScheduledRule:
         Type: "AWS::Events::Rule"
         Properties:
